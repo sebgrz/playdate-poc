@@ -21,7 +21,7 @@ endif
 VPATH += src
 
 # List C source files here
-SRC = src/main.c
+SRC = src/main_draw.c
 
 # List all user directories here
 UINCDIR = 
