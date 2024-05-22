@@ -1,17 +1,28 @@
 #include <math.h>
+#include <stdbool.h>
 #include <stdio.h>
 
 #include "pd_api.h"
 
 const int RAYS = 10;
 const int FOV_ANGLE = 60;
-const int FOV_LENGTH = 100;
+const int FOV_LENGTH = 150;
+const LCDRect WALLS[] = {
+    {.left = 50, .top = 50, .right = 100, .bottom = 150},
+    {.left = 100, .top = 150, .right = 200, .bottom = 150},
+    {.left = 50, .top = 50, .right = 200, .bottom = 30},
+};
+const size_t WALLS_SIZE = sizeof(WALLS) / sizeof(WALLS[0]);
 
 PlaydateAPI *globalPlaydate;
-PDRect wall = {.x = 50, .y = 50, .width = 30, .height = 100};
-int playerX = 180, playerY = 80;
+
+int playerX = 100, playerY = 100;
 int positionAngle = 0;
 
+static bool getLineIntersection(float p0_x, float p0_y, float p1_x,
+                                  float p1_y, float p2_x, float p2_y,
+                                  float p3_x, float p3_y, float *i_x,
+                                  float *i_y);
 static int normalizeAngle(int angle);
 static int update(void *userdata);
 static int updateKey(PDButtons button, int down, uint32_t when, void *userdata);
@@ -19,6 +30,7 @@ static int updateKey(PDButtons button, int down, uint32_t when, void *userdata);
 int eventHandler(PlaydateAPI *playdate, PDSystemEvent event, uint32_t arg) {
   if (event == kEventInit) {
     globalPlaydate = playdate;
+
     playdate->system->setButtonCallback(updateKey, playdate, 4);
     playdate->system->setUpdateCallback(update, playdate);
   }
@@ -56,8 +68,13 @@ static int update(void *userdata) {
   PlaydateAPI *playdate = userdata;
 
   playdate->graphics->clear(kColorWhite);
-  playdate->graphics->drawRect(wall.x, wall.y, wall.width, wall.height,
-                               kColorBlack);
+  int i;
+  const LCDRect *wall;
+  for (i = 0; i < WALLS_SIZE; i++) {
+    wall = &WALLS[i];
+    playdate->graphics->drawLine(wall->left, wall->top, wall->right,
+                                 wall->bottom, 1, kColorBlack);
+  }
 
   int rayStepAngle = round(FOV_ANGLE / RAYS);
   int startAngle = round(positionAngle - (FOV_ANGLE / 2));
@@ -78,8 +95,18 @@ static int update(void *userdata) {
     playdate->graphics->drawLine(playerX, playerY, round(distanceX),
                                  round(distanceY), 1, kColorBlack);
 
-    // playdate->system->logToConsole("ray: %d angle: %d - %f - x: %f y: %f",
-    // ray, startAngle, radAngle, distanceX, distanceY);
+    // wall collisions
+    int i;
+    float colX, colY;
+    for (i = 0; i < WALLS_SIZE; i++) {
+      wall = &WALLS[i];
+      if (getLineIntersection(playerX, playerY, distanceX, distanceY,
+                                wall->left, wall->top, wall->right,
+                                wall->bottom, &colX, &colY)) {
+        playdate->graphics->drawRect(colX, colY, 5, 5, kColorBlack);
+      }
+    }
+
     startAngle += rayStepAngle;
   }
 
@@ -94,4 +121,32 @@ static int normalizeAngle(int angle) {
   }
 
   return angle;
+}
+
+static bool getLineIntersection(float p0_x, float p0_y, float p1_x,
+                                  float p1_y, float p2_x, float p2_y,
+                                  float p3_x, float p3_y, float *i_x,
+                                  float *i_y) {
+  float s1_x, s1_y, s2_x, s2_y;
+  s1_x = p1_x - p0_x;
+  s1_y = p1_y - p0_y;
+  s2_x = p3_x - p2_x;
+  s2_y = p3_y - p2_y;
+
+  float s, t;
+  s = (-s1_y * (p0_x - p2_x) + s1_x * (p0_y - p2_y)) /
+      (-s2_x * s1_y + s1_x * s2_y);
+  t = (s2_x * (p0_y - p2_y) - s2_y * (p0_x - p2_x)) /
+      (-s2_x * s1_y + s1_x * s2_y);
+
+  if (s >= 0 && s <= 1 && t >= 0 && t <= 1) {
+    // Collision detected
+    // globalPlaydate->system->logToConsole("p0x: %f t: %f s1_x: %f", p0_x, t,
+    // s1_x);
+    *i_x = p0_x + (t * s1_x);
+    *i_y = p0_y + (t * s1_y);
+    return true;
+  }
+
+  return false; // No collision
 }
