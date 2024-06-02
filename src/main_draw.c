@@ -16,7 +16,7 @@ const size_t WALLS_SIZE = sizeof(WALLS) / sizeof(WALLS[0]);
 
 PlaydateAPI *globalPlaydate;
 
-int playerX = 100, playerY = 50;
+int playerX = 100, playerY = 80;
 int positionAngle = 0;
 
 static bool getLineIntersection(float p0_x, float p0_y, float p1_x, float p1_y,
@@ -95,6 +95,7 @@ static int update(void *userdata) {
     int i;
     float colX, colY, tempColX, tempColY, distance = FOV_LENGTH,
                                           tempDistance = FOV_LENGTH;
+    const LCDRect *nearestWall = NULL;
     for (i = 0; i < WALLS_SIZE; i++) {
       wall = &WALLS[i];
       if (getLineIntersection(playerX, playerY, distanceX, distanceY,
@@ -104,9 +105,19 @@ static int update(void *userdata) {
           distance = tempDistance;
           colX = tempColX;
           colY = tempColY;
+          nearestWall = wall;
         }
       }
     }
+    // Wall start-end
+    if (nearestWall != NULL) {
+      playdate->graphics->drawLine(playerX, playerY, nearestWall->left,
+                                   nearestWall->top, 1, kColorBlack);
+
+      playdate->graphics->drawLine(playerX, playerY, nearestWall->right,
+                                   nearestWall->bottom, 1, kColorBlack);
+    }
+
     if (distance < FOV_LENGTH) {
       playdate->graphics->drawRect(colX, colY, 5, 5, kColorBlack);
       playdate->graphics->drawLine(playerX, playerY, round(colX), round(colY),
