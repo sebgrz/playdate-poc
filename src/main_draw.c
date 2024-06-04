@@ -4,10 +4,14 @@
 
 #include "pd_api.h"
 
+const double RAD_ZERO_ANGLE = 0;
+const double RAD_FULL_ANGLE = 360 * (M_PI / 180);
+
 const int RAYS = 10;
 const int FOV_ANGLE = 60;
 const int FOV_LENGTH = 150;
 const LCDRect WALLS[] = {
+    {.left = 50, .top = 10, .right = 350, .bottom = 5},
     {.left = 50, .top = 50, .right = 100, .bottom = 150},
     {.left = 100, .top = 150, .right = 200, .bottom = 150},
     {.left = 50, .top = 50, .right = 200, .bottom = 30},
@@ -19,6 +23,7 @@ PlaydateAPI *globalPlaydate;
 int playerX = 100, playerY = 80;
 int positionAngle = 0;
 
+static double angleOf(double p0_x, double p0_y, double p1_x, double p1_y);
 static bool getLineIntersection(float p0_x, float p0_y, float p1_x, float p1_y,
                                 float p2_x, float p2_y, float p3_x, float p3_y,
                                 float *i_x, float *i_y, float *distance);
@@ -75,6 +80,63 @@ static int update(void *userdata) {
                                  wall->bottom, 1, kColorBlack);
   }
 
+  //
+  int startAngle = normalizeAngle(round(positionAngle - (FOV_ANGLE / 2)));
+  int endAngle = normalizeAngle(round(positionAngle + (FOV_ANGLE / 2)));
+  double playerRadStartAngle = startAngle * (M_PI / 180);
+  double playerRadEndAngle = endAngle * (M_PI / 180);
+  double middleAngle = playerRadEndAngle;
+  double beginningAngle = playerRadStartAngle;
+
+  if (playerRadEndAngle < playerRadStartAngle) {
+    middleAngle = RAD_FULL_ANGLE;
+    beginningAngle = RAD_ZERO_ANGLE;
+  }
+
+  for (i = 0; i < WALLS_SIZE; i++) {
+    wall = &WALLS[i];
+
+    float startDistancePoint =
+        sqrt(pow(wall->left - playerX, 2) + pow(wall->top - playerY, 2));
+    float endDistancePoint =
+        sqrt(pow(wall->right - playerX, 2) + pow(wall->bottom - playerY, 2));
+    double angleStartPoint = angleOf(wall->left, wall->top, playerX, playerY);
+    double angleEndPoint = angleOf(wall->right, wall->bottom, playerX, playerY);
+
+    if ((playerRadStartAngle <= angleStartPoint &&
+         angleStartPoint <= middleAngle) ||
+        (beginningAngle <= angleStartPoint &&
+         angleStartPoint <= playerRadEndAngle)) {
+      playdate->graphics->drawLine(wall->left, wall->top, playerX, playerY, 1,
+                                   kColorBlack);
+    }
+
+    if ((playerRadStartAngle <= angleEndPoint &&
+         angleEndPoint <= middleAngle) ||
+        (beginningAngle <= angleEndPoint &&
+         angleEndPoint <= playerRadEndAngle)) {
+      playdate->graphics->drawLine(wall->right, wall->bottom, playerX, playerY,
+                                   1, kColorBlack);
+    }
+  }
+
+  double distanceX = playerX + FOV_LENGTH, distanceY = playerY;
+
+  double startX = (distanceX - playerX) * cos(playerRadStartAngle) -
+                  (distanceY - playerY) * sin(playerRadStartAngle) + playerX;
+  double startY = (distanceX - playerX) * sin(playerRadStartAngle) +
+                  (distanceY - playerY) * cos(playerRadStartAngle) + playerY;
+  playdate->graphics->drawLine(startX, startY, playerX, playerY, 1,
+                               kColorBlack);
+
+  startX = (distanceX - playerX) * cos(playerRadEndAngle) -
+           (distanceY - playerY) * sin(playerRadEndAngle) + playerX;
+  startY = (distanceX - playerX) * sin(playerRadEndAngle) +
+           (distanceY - playerY) * cos(playerRadEndAngle) + playerY;
+  playdate->graphics->drawLine(startX, startY, playerX, playerY, 1,
+                               kColorBlack);
+
+  /*
   int rayStepAngle = round(FOV_ANGLE / RAYS);
   int startAngle = round(positionAngle - (FOV_ANGLE / 2));
   int ray = 0;
@@ -129,6 +191,7 @@ static int update(void *userdata) {
 
     startAngle += rayStepAngle;
   }
+  */
 
   return 1;
 }
@@ -141,6 +204,13 @@ static int normalizeAngle(int angle) {
   }
 
   return angle;
+}
+
+static double angleOf(double pointX, double pointY, double centerX,
+                      double centerY) {
+  double deltaY = centerY - pointY;
+  double deltaX = centerX - pointX;
+  return atan2(deltaY, deltaX) + M_PI;
 }
 
 static bool getLineIntersection(float p0_x, float p0_y, float p1_x, float p1_y,
