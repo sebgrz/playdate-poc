@@ -4,6 +4,9 @@
 
 #include "pd_api.h"
 
+#define STB_DS_IMPLEMENTATION
+#include "stb/stb_ds.h"
+
 const double RAD_ZERO_ANGLE = 0;
 const double RAD_FULL_ANGLE = 360 * (M_PI / 180);
 
@@ -15,14 +18,22 @@ const LCDRect WALLS[] = {
     {.left = 50, .top = 50, .right = 100, .bottom = 150},
     {.left = 100, .top = 150, .right = 200, .bottom = 150},
     {.left = 50, .top = 50, .right = 200, .bottom = 30},
+    {.left = 260, .top = 180, .right = 300, .bottom = 30},
 };
 const size_t WALLS_SIZE = sizeof(WALLS) / sizeof(WALLS[0]);
 
 PlaydateAPI *globalPlaydate;
 
-int playerX = 100, playerY = 80;
+int previousPlayerX = 0, playerX = 100, previousPlayerY = 0, playerY = 80;
 int positionAngle = 0;
+const LCDRect **selectedWalls = NULL;
+LCDRect *visibleRays = NULL;
 
+static bool lineSegmentIntersectsCircleOptimized(float x1, float y1, float x2,
+                                                 float y2, float cx, float cy,
+                                                 int r);
+static float distanceBetweenPoints(float p0_x, float p0_y, float p1_x,
+                                   float p1_y);
 static double angleOf(double p0_x, double p0_y, double p1_x, double p1_y);
 static bool getLineIntersection(float p0_x, float p0_y, float p1_x, float p1_y,
                                 float p2_x, float p2_y, float p3_x, float p3_y,
@@ -70,6 +81,7 @@ static int updateKey(PDButtons button, int down, uint32_t when,
 
 static int update(void *userdata) {
   PlaydateAPI *playdate = userdata;
+  arrfree(visibleRays);
 
   playdate->graphics->clear(kColorWhite);
   int i;
@@ -78,6 +90,22 @@ static int update(void *userdata) {
     wall = &WALLS[i];
     playdate->graphics->drawLine(wall->left, wall->top, wall->right,
                                  wall->bottom, 1, kColorBlack);
+  }
+
+  // take all nearest walls around player - fov radius
+  if (previousPlayerX != playerX || previousPlayerY != playerY) {
+    arrfree(selectedWalls);
+    for (i = 0; i < WALLS_SIZE; i++) {
+      wall = &WALLS[i];
+      if (lineSegmentIntersectsCircleOptimized(wall->left, wall->top,
+                                               wall->right, wall->bottom,
+                                               playerX, playerY, FOV_LENGTH)) {
+        arrput(selectedWalls, wall);
+      }
+    }
+
+    playdate->system->logToConsole("Size of selected walls: %d",
+                                   arrlen(selectedWalls));
   }
 
   //
@@ -93,8 +121,9 @@ static int update(void *userdata) {
     beginningAngle = RAD_ZERO_ANGLE;
   }
 
-  for (i = 0; i < WALLS_SIZE; i++) {
-    wall = &WALLS[i];
+  // draw segments to all visible points of walls
+  for (i = 0; i < arrlen(selectedWalls); i++) {
+    wall = selectedWalls[i];
 
     float startDistancePoint =
         sqrt(pow(wall->left - playerX, 2) + pow(wall->top - playerY, 2));
@@ -107,21 +136,42 @@ static int update(void *userdata) {
          angleStartPoint <= middleAngle) ||
         (beginningAngle <= angleStartPoint &&
          angleStartPoint <= playerRadEndAngle)) {
-      playdate->graphics->drawLine(wall->left, wall->top, playerX, playerY, 1,
-                                   kColorBlack);
+      // check distance to the point
+      if (distanceBetweenPoints(wall->left, wall->top, playerX, playerY) <=
+          FOV_LENGTH) {
+        arrput(visibleRays, ((LCDRect){.left = wall->left,
+                                       .top = wall->top,
+                                       .right = playerX,
+                                       .bottom = playerY}));
+      }
     }
 
     if ((playerRadStartAngle <= angleEndPoint &&
          angleEndPoint <= middleAngle) ||
         (beginningAngle <= angleEndPoint &&
          angleEndPoint <= playerRadEndAngle)) {
-      playdate->graphics->drawLine(wall->right, wall->bottom, playerX, playerY,
-                                   1, kColorBlack);
+      // check distance to the point
+      if (distanceBetweenPoints(wall->right, wall->bottom, playerX, playerY) <=
+          FOV_LENGTH) {
+        arrput(visibleRays, ((LCDRect){.left = wall->right,
+                                       .top = wall->bottom,
+                                       .right = playerX,
+                                       .bottom = playerY}));
+      }
     }
+  }
+
+  // draw visible rays
+  for (i = 0; i < arrlen(visibleRays); i++) {
+    LCDRect *raySegment = &visibleRays[i];
+    playdate->graphics->drawLine(raySegment->left, raySegment->top,
+                                 raySegment->right, raySegment->bottom, 1,
+                                 kColorBlack);
   }
 
   double distanceX = playerX + FOV_LENGTH, distanceY = playerY;
 
+  // draw start edge of fov
   double startX = (distanceX - playerX) * cos(playerRadStartAngle) -
                   (distanceY - playerY) * sin(playerRadStartAngle) + playerX;
   double startY = (distanceX - playerX) * sin(playerRadStartAngle) +
@@ -129,6 +179,7 @@ static int update(void *userdata) {
   playdate->graphics->drawLine(startX, startY, playerX, playerY, 1,
                                kColorBlack);
 
+  // draw end edge of fov
   startX = (distanceX - playerX) * cos(playerRadEndAngle) -
            (distanceY - playerY) * sin(playerRadEndAngle) + playerX;
   startY = (distanceX - playerX) * sin(playerRadEndAngle) +
@@ -136,6 +187,8 @@ static int update(void *userdata) {
   playdate->graphics->drawLine(startX, startY, playerX, playerY, 1,
                                kColorBlack);
 
+  previousPlayerX = playerX;
+  previousPlayerY = playerY;
   /*
   int rayStepAngle = round(FOV_ANGLE / RAYS);
   int startAngle = round(positionAngle - (FOV_ANGLE / 2));
@@ -235,9 +288,31 @@ static bool getLineIntersection(float p0_x, float p0_y, float p1_x, float p1_y,
     // s1_x);
     *i_x = p0_x + (t * s1_x);
     *i_y = p0_y + (t * s1_y);
-    *intersectionDistance = sqrt(pow(*i_x - p0_x, 2) + pow(*i_y - p0_y, 2));
+    *intersectionDistance = distanceBetweenPoints(*i_x, *i_y, p0_x, p0_y);
     return true;
   }
 
   return false; // No collision
+}
+
+static float distanceBetweenPoints(float p0_x, float p0_y, float p1_x,
+                                   float p1_y) {
+  return sqrt(pow(p1_x - p0_x, 2) + pow(p1_y - p0_y, 2));
+}
+
+// https://stackoverflow.com/a/67117213
+static bool lineSegmentIntersectsCircleOptimized(float x1, float y1, float x2,
+                                                 float y2, float cx, float cy,
+                                                 int r) {
+  float x_linear = x2 - x1;
+  float x_constant = x1 - cx;
+  float y_linear = y2 - y1;
+  float y_constant = y1 - cy;
+  float a = x_linear * x_linear + y_linear * y_linear;
+  float half_b = x_linear * x_constant + y_linear * y_constant;
+  float c = x_constant * x_constant + y_constant * y_constant - r * r;
+
+  return half_b * half_b >= a * c &&
+         (-half_b <= a || c + half_b + half_b + a <= 0) &&
+         (half_b <= 0 || c <= 0);
 }
