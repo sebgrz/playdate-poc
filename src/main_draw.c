@@ -19,6 +19,7 @@ const LCDRect WALLS[] = {
     {.left = 100, .top = 150, .right = 200, .bottom = 150},
     {.left = 50, .top = 50, .right = 200, .bottom = 30},
     {.left = 260, .top = 180, .right = 300, .bottom = 30},
+    {.left = 180, .top = 170, .right = 220, .bottom = 150},
 };
 const size_t WALLS_SIZE = sizeof(WALLS) / sizeof(WALLS[0]);
 
@@ -75,7 +76,7 @@ static int updateKey(PDButtons button, int down, uint32_t when,
   }
 
   positionAngle = normalizeAngle(positionAngle);
-  playdate->system->logToConsole("angle: %d", positionAngle);
+  // playdate->system->logToConsole("angle: %d", positionAngle);
   return 0;
 }
 
@@ -104,8 +105,8 @@ static int update(void *userdata) {
       }
     }
 
-    playdate->system->logToConsole("Size of selected walls: %d",
-                                   arrlen(selectedWalls));
+    // playdate->system->logToConsole("Size of selected walls: %d",
+    // arrlen(selectedWalls));
   }
 
   //
@@ -139,10 +140,10 @@ static int update(void *userdata) {
       // check distance to the point
       if (distanceBetweenPoints(wall->left, wall->top, playerX, playerY) <=
           FOV_LENGTH) {
-        arrput(visibleRays, ((LCDRect){.left = wall->left,
-                                       .top = wall->top,
-                                       .right = playerX,
-                                       .bottom = playerY}));
+        arrput(visibleRays, ((LCDRect){.left = playerX,
+                                       .top = playerY,
+                                       .right = wall->left,
+                                       .bottom = wall->top}));
       }
     }
 
@@ -153,10 +154,10 @@ static int update(void *userdata) {
       // check distance to the point
       if (distanceBetweenPoints(wall->right, wall->bottom, playerX, playerY) <=
           FOV_LENGTH) {
-        arrput(visibleRays, ((LCDRect){.left = wall->right,
-                                       .top = wall->bottom,
-                                       .right = playerX,
-                                       .bottom = playerY}));
+        arrput(visibleRays, ((LCDRect){.left = playerX,
+                                       .top = playerY,
+                                       .right = wall->right,
+                                       .bottom = wall->bottom}));
       }
     }
   }
@@ -164,9 +165,33 @@ static int update(void *userdata) {
   // draw visible rays
   for (i = 0; i < arrlen(visibleRays); i++) {
     LCDRect *raySegment = &visibleRays[i];
-    playdate->graphics->drawLine(raySegment->left, raySegment->top,
-                                 raySegment->right, raySegment->bottom, 1,
-                                 kColorBlack);
+
+    int w;
+    float intersectionPointX = 0, intersectionPointY = 0,
+          intersectionDistance = FOV_LENGTH;
+    float newRaySegmentX = raySegment->right,
+          newRaySegmentY = raySegment->bottom,
+          tempIntersectionDistance = FOV_LENGTH;
+    bool isRayIntersectedWithWall = false;
+    for (w = 0; w < arrlen(selectedWalls); w++) {
+      const LCDRect *selectedWall = selectedWalls[w];
+
+      isRayIntersectedWithWall = getLineIntersection(
+          raySegment->left, raySegment->top, raySegment->right,
+          raySegment->bottom, selectedWall->left, selectedWall->top,
+          selectedWall->right, selectedWall->bottom, &intersectionPointX,
+          &intersectionPointY, &intersectionDistance);
+
+      // looking for nearest point of intersection for given ray
+      if (intersectionDistance < tempIntersectionDistance) {
+        newRaySegmentX = intersectionPointX;
+        newRaySegmentY = intersectionPointY;
+        tempIntersectionDistance = intersectionDistance;
+      }
+    }
+
+    playdate->graphics->drawLine(newRaySegmentX, newRaySegmentY, playerX,
+                                 playerY, 1, kColorBlack);
   }
 
   double distanceX = playerX + FOV_LENGTH, distanceY = playerY;
